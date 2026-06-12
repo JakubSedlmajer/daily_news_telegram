@@ -1,0 +1,31 @@
+name: Denní přehled – Blízký východ
+
+on:
+  schedule:
+    # Každý den v 7:00 SEČ (= 6:00 UTC v zimě, 5:00 UTC v létě)
+    # Upravte podle potřeby: https://crontab.guru
+    - cron: "0 5 * * *"
+  workflow_dispatch:  # Umožní spustit ručně z GitHub UI
+
+jobs:
+  daily-summary:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repozitáře
+        uses: actions/checkout@v4
+
+      - name: Nastavení Pythonu
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Instalace závislostí
+        run: pip install anthropic requests
+
+      - name: Spuštění shrnutí
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python summarize.py
