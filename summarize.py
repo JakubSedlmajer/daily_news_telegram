@@ -13,7 +13,7 @@ TELEGRAM_CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
 
 PROMPT = (
     "Vyhledej aktuální zprávy z Blízkého východu za posledních 24 hodin. "
-    "Zaměř se na: Izrael/Gaza/Libanon, Írán, Sýrii, Irák, Jemen a případně Saúdskou Arábii. "
+    "Zaměř se na: Izrael/Gaza/Libanon, Írán, Sýrii, Irák, Jemen a případně Saúdskou Arábii. Především na situaci v Iráckém Kurdistánu ve spojitosti s zmíněnými zeměmi."
     "Napiš stručné denní shrnutí v češtině. "
     "Formát:\n"
     "🌍 *Blízký východ – denní přehled*\n"
