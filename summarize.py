@@ -33,7 +33,7 @@ def get_summary() -> str:
     # Agentic loop
     while True:
         response = client.messages.create(
-            model="claude-haiku-4-5",
+            model="claude-sonnet-4-6",
             max_tokens=2048,
             tools=tools,
             messages=messages,
