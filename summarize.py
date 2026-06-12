@@ -1,75 +1,101 @@
 #!/usr/bin/env python3
 """
 Denní shrnutí zpráv z Blízkého východu → Telegram
+Zdroj zpráv: NewsAPI (zdarma)
+Shrnutí: Claude Haiku (levné)
 """
 
 import os
 import requests
 import anthropic
+from datetime import datetime, timedelta, timezone
 
 ANTHROPIC_API_KEY = os.environ["ANTHROPIC_API_KEY"]
 TELEGRAM_TOKEN = os.environ["TELEGRAM_TOKEN"]
 TELEGRAM_CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
+NEWSAPI_KEY = os.environ["NEWSAPI_KEY"]
 
-PROMPT = (
-    "Vyhledej aktuální zprávy z Blízkého východu za posledních 24 hodin. "
-    "Zaměř se na: Izrael/Gaza/Libanon, Írán, Sýrii, Irák, Jemen a případně Saúdskou Arábii. Především na situaci v Iráckém Kurdistánu ve spojitosti s zmíněnými zeměmi."
-    "Napiš stručné denní shrnutí v češtině. "
-    "Formát:\n"
-    "🌍 *Blízký východ – denní přehled*\n"
-    "_(datum)_\n\n"
-    "Pro každou relevantní zemi/téma použij emoji a krátký odstavec (2–3 věty). "
-    "Na konci přidej 1 větu celkového hodnocení situace. "
-    "Používej Markdown formátování kompatibilní s Telegramem (tučné *text*, kurzíva _text_)."
-)
+TOPICS = [
+    "Israel Gaza",
+    "Iran Israel",
+    "Syria",
+    "Iraq war",
+    "Yemen Houthi",
+    "Lebanon Hezbollah",
+    "Middle East",
+]
 
 
-def get_summary() -> str:
+def fetch_news() -> str:
+    """Stáhne zprávy z NewsAPI za posledních 24 hodin."""
+    yesterday = (datetime.now(timezone.utc) - timedelta(hours=24)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    all_articles = []
+
+    for topic in TOPICS:
+        url = "https://newsapi.org/v2/everything"
+        params = {
+            "q": topic,
+            "from": yesterday,
+            "sortBy": "publishedAt",
+            "language": "en",
+            "pageSize": 3,
+            "apiKey": NEWSAPI_KEY,
+        }
+        resp = requests.get(url, params=params, timeout=15)
+        if resp.status_code != 200:
+            print(f"NewsAPI chyba pro '{topic}': {resp.status_code}")
+            continue
+
+        data = resp.json()
+        articles = data.get("articles", [])
+        for a in articles:
+            title = a.get("title", "")
+            description = a.get("description", "")
+            source = a.get("source", {}).get("name", "")
+            published = a.get("publishedAt", "")[:10]
+            if title and "[Removed]" not in title:
+                all_articles.append(f"[{published}] {source}: {title}. {description}")
+
+    if not all_articles:
+        return "Žádné zprávy nenalezeny."
+
+    # Odstraň duplicity
+    seen = set()
+    unique = []
+    for a in all_articles:
+        if a not in seen:
+            seen.add(a)
+            unique.append(a)
+
+    return "\n".join(unique[:30])  # max 30 článků
+
+
+def get_summary(news_text: str) -> str:
+    """Shrne zprávy pomocí Claude Haiku."""
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
-    messages = [{"role": "user", "content": PROMPT}]
-    tools = [{"type": "web_search_20250305", "name": "web_search"}]
+    today = datetime.now().strftime("%-d. %-m. %Y")
 
-    # Agentic loop
-    while True:
-        response = client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=2048,
-            tools=tools,
-            messages=messages,
-        )
+    prompt = f"""Na základě těchto zpravodajských článků z posledních 24 hodin napiš stručné denní shrnutí situace na Blízkém východě v češtině.
 
-        print(f"stop_reason: {response.stop_reason}")
-        print(f"block types: {[b.type for b in response.content]}")
+ČLÁNKY:
+{news_text}
 
-        # Sbírej všechny textové bloky
-        text_blocks = [b.text for b in response.content if hasattr(b, "text") and b.text]
+FORMÁT (použij přesně tento):
+🌍 *Blízký východ – denní přehled*
+_{today}_
 
-        if response.stop_reason == "end_turn":
-            if text_blocks:
-                return "\n\n".join(text_blocks)
-            return "Shrnutí se nepodařilo vygenerovat."
+Pro každou relevantní zemi/téma použij emoji a napiš 2–3 věty. Používej Markdown kompatibilní s Telegramem (*tučné*, _kurzíva_). Na konci přidej jednu větu celkového hodnocení situace.
 
-        # Přidej odpověď do historie
-        messages.append({"role": "assistant", "content": response.content})
+Piš pouze na základě poskytnutých článků, nevymýšlej informace."""
 
-        # Zpracuj tool_use bloky
-        tool_results = []
-        for block in response.content:
-            if block.type == "tool_use":
-                tool_results.append({
-                    "type": "tool_result",
-                    "tool_use_id": block.id,
-                    "content": "Proveď vyhledávání a zahrň výsledky do shrnutí.",
-                })
+    response = client.messages.create(
+        model="claude-haiku-4-5",
+        max_tokens=1024,
+        messages=[{"role": "user", "content": prompt}],
+    )
 
-        if tool_results:
-            messages.append({"role": "user", "content": tool_results})
-        else:
-            # Žádné tool cally ale ani end_turn → vrať co máme
-            if text_blocks:
-                return "\n\n".join(text_blocks)
-            return "Shrnutí se nepodařilo vygenerovat."
+    return response.content[0].text
 
 
 def send_telegram(text: str) -> None:
@@ -85,7 +111,12 @@ def send_telegram(text: str) -> None:
 
 
 if __name__ == "__main__":
-    print("Generuji shrnutí...")
-    summary = get_summary()
+    print("Stahuji zprávy z NewsAPI...")
+    news = fetch_news()
+    print(f"Nalezeno článků: {news.count(chr(10)) + 1}")
+
+    print("Generuji shrnutí (Claude Haiku)...")
+    summary = get_summary(news)
     print(summary)
+
     send_telegram(summary)
